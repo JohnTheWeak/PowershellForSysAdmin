@@ -1,0 +1,306 @@
+' ===================================================
+' MAIN MODULE - Paste all this code into a new module
+' ===================================================
+
+Option Explicit
+
+' ===================================================
+' MAIN FUNCTION - Creates the Checking File
+' ===================================================
+Sub CreateChecking_43F_DataCentre()
+    Dim RawFile As String, IvantiFile As String
+    Dim wbRaw As Workbook, wbIvanti As Workbook
+    Dim wsRaw As Worksheet, wsIvanti As Worksheet, wsCheck As Worksheet
+    Dim i As Long, j As Long, OutRow As Long
+    Dim dataCount As Long
+    
+    ' Turn off screen updating for better performance
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    
+    On Error GoTo ErrorHandler
+    
+    ' ===========================================
+    ' 1. GET FILES
+    ' ===========================================
+    RawFile = Application.GetOpenFilename("Excel Files (*.xlsx),*.xlsx", , "Select raw file (e.g., Aug_2025.xlsx)")
+    If RawFile = "False" Then
+        Application.ScreenUpdating = True
+        Application.DisplayAlerts = True
+        Exit Sub
+    End If
+    
+    IvantiFile = Application.GetOpenFilename("Excel Files (*.xlsx),*.xlsx", , "Select ivanti file")
+    If IvantiFile = "False" Then
+        Application.ScreenUpdating = True
+        Application.DisplayAlerts = True
+        Exit Sub
+    End If
+    
+    ' ===========================================
+    ' 2. OPEN FILES
+    ' ===========================================
+    Set wbRaw = Workbooks.Open(RawFile, ReadOnly:=True)
+    Set wsRaw = wbRaw.Sheets(1)
+    
+    Set wbIvanti = Workbooks.Open(IvantiFile, ReadOnly:=True)
+    Set wsIvanti = wbIvanti.Sheets(1)
+    
+    ' ===========================================
+    ' 3. CREATE CHECKING SHEET
+    ' ===========================================
+    On Error Resume Next
+    ThisWorkbook.Sheets("Checking").Delete
+    On Error GoTo ErrorHandler
+    
+    Set wsCheck = ThisWorkbook.Sheets.Add
+    wsCheck.Name = "Checking"
+    
+    ' ===========================================
+    ' 4. SET UP HEADERS
+    ' ===========================================
+    wsCheck.Range("A1:H1").Value = Array("", "Event Date", "Card #(F/C)", "Description", _
+                                         "Location", "Department", "Employee Number", "ID")
+    
+    ' Format headers
+    With wsCheck.Range("A1:H1")
+        .Font.Bold = True
+        .HorizontalAlignment = xlCenter
+    End With
+    
+    ' ===========================================
+    ' 5. FIND DATA ROWS
+    ' ===========================================
+    Dim lastRow As Long
+    lastRow = wsRaw.Cells(wsRaw.Rows.Count, "A").End(xlUp).Row
+    
+    Dim ivLastRow As Long
+    ivLastRow = wsIvanti.Cells(wsIvanti.Rows.Count, "A").End(xlUp).Row
+    
+    ' ===========================================
+    ' 6. PROCESS DATA CENTRE RECORDS
+    ' ===========================================
+    OutRow = 2
+    dataCount = 0
+    
+    ' Start from row 9 (where data begins in your sample)
+    For i = 9 To lastRow
+        
+        ' Get location from column F
+        Dim locationText As String
+        locationText = CStr(wsRaw.Cells(i, 6).Value)
+        
+        ' Clean and check for "43F Data Centre"
+        If Len(locationText) > 0 Then
+            ' Clean up spaces
+            locationText = Replace(locationText, "  ", " ")  ' Fix double spaces
+            locationText = Trim(locationText)
+            
+            ' Check if it contains "43F Data Centre"
+            If InStr(1, locationText, "43F Data Centre", vbTextCompare) > 0 Then
+                
+                ' Get date from raw file
+                Dim rawDate As Date
+                If IsDate(wsRaw.Cells(i, 2).Value) Then
+                    rawDate = DateValue(wsRaw.Cells(i, 2).Value)  ' Date only
+                Else
+                    rawDate = DateSerial(1900, 1, 1)
+                End If
+                
+                ' ===========================================
+                ' 7. FIND MATCHING ID FROM IVANTI (BY DATE)
+                ' ===========================================
+                Dim FoundID As String
+                FoundID = ""
+                
+                ' Search through ivanti file
+                For j = 2 To ivLastRow
+                    
+                    ' Get date from ivanti (column E)
+                    Dim ivantiDate As Date
+                    If IsDate(wsIvanti.Cells(j, 5).Value) Then
+                        ivantiDate = DateValue(wsIvanti.Cells(j, 5).Value)  ' Date only
+                    Else
+                        ivantiDate = DateSerial(1900, 1, 1)
+                    End If
+                    
+                    ' Match by date
+                    If rawDate = ivantiDate Then
+                        FoundID = wsIvanti.Cells(j, 1).Value  ' Get ID from column A
+                        Exit For
+                    End If
+                Next j
+                
+                ' ===========================================
+                ' 8. COPY DATA TO CHECKING SHEET
+                ' ===========================================
+                wsCheck.Cells(OutRow, 1).Value = Trim(wsRaw.Cells(i, 1).Value)   ' Name (A)
+                wsCheck.Cells(OutRow, 2).Value = wsRaw.Cells(i, 2).Value         ' Event Date (B)
+                wsCheck.Cells(OutRow, 3).Value = wsRaw.Cells(i, 3).Value         ' Card # (C)
+                wsCheck.Cells(OutRow, 4).Value = wsRaw.Cells(i, 4).Value         ' Description (D)
+                wsCheck.Cells(OutRow, 5).Value = wsRaw.Cells(i, 6).Value         ' Location (F)
+                wsCheck.Cells(OutRow, 6).Value = wsRaw.Cells(i, 11).Value        ' Department (K)
+                wsCheck.Cells(OutRow, 7).Value = wsRaw.Cells(i, 12).Value        ' Employee Number (L)
+                wsCheck.Cells(OutRow, 8).Value = FoundID                         ' ID from ivanti
+                
+                ' Move to next row
+                OutRow = OutRow + 1
+                dataCount = dataCount + 1
+            End If
+        End If
+    Next i
+    
+    ' ===========================================
+    ' 9. CLOSE SOURCE FILES
+    ' ===========================================
+    wbRaw.Close False
+    wbIvanti.Close False
+    
+    ' ===========================================
+    ' 10. FORMAT THE CHECKING SHEET
+    ' ===========================================
+    If dataCount > 0 Then
+        ' Auto-fit columns
+        wsCheck.Columns("A:H").AutoFit
+        
+        ' Add borders
+        With wsCheck.Range("A1:H" & OutRow - 1).Borders
+            .LineStyle = xlContinuous
+            .Weight = xlThin
+            .Color = RGB(200, 200, 200)
+        End With
+        
+        ' Format date column
+        wsCheck.Columns("B:B").NumberFormat = "dd/mm/yyyy hh:mm:ss AM/PM"
+        
+        ' Format ID column as text
+        wsCheck.Columns("H:H").NumberFormat = "@"
+        
+        ' Show success message
+        MsgBox "Success! Created " & dataCount & " '43F Data Centre' records.", vbInformation
+    Else
+        ' No records found
+        MsgBox "No records found with '43F Data Centre' in the Location column.", vbExclamation
+    End If
+    
+    ' ===========================================
+    ' 11. FINISH
+    ' ===========================================
+    wsCheck.Activate
+    
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    Exit Sub
+    
+ErrorHandler:
+    ' Clean up on error
+    Application.ScreenUpdating = True
+    Application.DisplayAlerts = True
+    
+    If Not wbRaw Is Nothing Then wbRaw.Close False
+    If Not wbIvanti Is Nothing Then wbIvanti.Close False
+    
+    MsgBox "Error: " & Err.Description, vbCritical
+End Sub
+
+' ===================================================
+' BUTTON SETUP - Creates the button on the main sheet
+' ===================================================
+Sub AddButtonToWorkbook()
+    Dim ws As Worksheet
+    Dim btn As Button
+    
+    ' Get or create main sheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Main")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+        ws.Name = "Main"
+    End If
+    On Error GoTo 0
+    
+    ' Clear the sheet
+    ws.Cells.Clear
+    
+    ' Add a title
+    With ws.Range("A1")
+        .Value = "Data Centre Checking"
+        .Font.Size = 16
+        .Font.Bold = True
+        .Font.Color = RGB(0, 0, 150)
+        .HorizontalAlignment = xlCenter
+    End With
+    
+    ' Merge title across columns
+    ws.Range("A1:D1").Merge
+    
+    ' Add a blank row
+    ws.Rows(2).RowHeight = 20
+    
+    ' Add the button (positioned nicely)
+    Set btn = ws.Buttons.Add(Left:=ws.Range("B4").Left, Top:=ws.Range("B4").Top, Width:=140, Height:=40)
+    
+    With btn
+        .Caption = "Create Checking"
+        .Name = "btnCreateChecking"
+        .OnAction = "CreateChecking_43F_DataCentre"
+        .Font.Size = 12
+        .Font.Bold = True
+    End With
+    
+    ' Add a simple instruction below the button
+    With ws.Range("A7")
+        .Value = "Click button above to select files and create Checking sheet"
+        .Font.Size = 10
+        .Font.Color = RGB(100, 100, 100)
+        .HorizontalAlignment = xlCenter
+    End With
+    
+    ws.Range("A7:D7").Merge
+    
+    ' Auto-fit columns
+    ws.Columns("A:D").AutoFit
+    
+    ' Center everything vertically
+    ws.Range("A1:D10").VerticalAlignment = xlCenter
+    
+    ' Set row heights for better spacing
+    ws.Rows(1).RowHeight = 30
+    ws.Rows(3).RowHeight = 20
+    ws.Rows(5).RowHeight = 10
+    
+    ' Activate the main sheet
+    ws.Activate
+    
+    MsgBox "Setup complete! Click 'Create Checking' to start.", vbInformation
+End Sub
+
+' ===================================================
+' QUICK SETUP - Run this once to set everything up
+' ===================================================
+Sub SetupEverything()
+    ' Run this once to create the button
+    Call AddButtonToWorkbook
+End Sub
+
+' ===================================================
+' AUTO-RUN SETUP WHEN WORKBOOK OPENS
+' (Add this to ThisWorkbook module)
+' ===================================================
+' Instructions for adding auto-run:
+' 1. In VBA Editor, double-click "ThisWorkbook" in Project Explorer
+' 2. Paste this code:
+'
+' Private Sub Workbook_Open()
+'     ' Check if button already exists
+'     On Error Resume Next
+'     Dim btn As Button
+'     Set btn = ThisWorkbook.Sheets("Main").Buttons("btnCreateChecking")
+'     On Error GoTo 0
+'
+'     ' If button doesn't exist, create it
+'     If btn Is Nothing Then
+'         Call AddButtonToWorkbook
+'     End If
+' End Sub
+
